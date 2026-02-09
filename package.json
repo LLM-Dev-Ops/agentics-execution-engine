@@ -1,0 +1,23 @@
+{
+  "name": "agentics-execution-engine",
+  "version": "0.1.0",
+  "description": "Agentics execution spine — accepts execution intents, resolves Cores from agentics-contracts, dispatches to Core services, and produces execution graphs with mandatory evidence validation.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "semver": "^7.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/semver": "^7.5.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}
