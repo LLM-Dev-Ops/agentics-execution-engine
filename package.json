@@ -9,6 +9,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "start": "node dist/server.js",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
