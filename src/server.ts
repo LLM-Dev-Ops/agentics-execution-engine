@@ -9,6 +9,10 @@ const PORT = parseInt(process.env.PORT ?? '8080', 10);
 const HMAC_SECRET = process.env.EXECUTION_HMAC_SECRET ?? '';
 const PLATFORM_API_KEY = process.env.PLATFORM_API_KEY ?? '';
 const RESULTS_INDEX_URL = process.env.RESULTS_INDEX_URL ?? '';
+const AGENTICS_MODE = process.env.AGENTICS_MODE ?? '';
+const AGENTICS_ROLE = process.env.AGENTICS_ROLE ?? '';
+
+console.log('[BOOT] execution-engine mode:', AGENTICS_MODE);
 
 // --- ContractRegistry backed by platform API ---
 
@@ -139,6 +143,19 @@ const server = createServer(async (req, res) => {
   json(res, 404, { error: 'Not found' });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`agentics-execution-engine listening on port ${PORT}`);
-});
+// --- Execution listener for AGENTICS_MODE=execution or AGENTICS_ROLE=execution ---
+
+function startExecutionListener(): void {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`agentics-execution-engine listening on port ${PORT}`);
+    console.log('[execution] listener started');
+  });
+}
+
+if (AGENTICS_MODE === 'execution' || AGENTICS_ROLE === 'execution') {
+  startExecutionListener();
+} else {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`agentics-execution-engine listening on port ${PORT}`);
+  });
+}
