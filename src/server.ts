@@ -4,6 +4,8 @@ import { ExecutionDispatcher } from './execution_dispatcher.js';
 import { CoreAdapter, type ContractRegistry, type ContractEntry, type HttpClient, type HttpResponse } from './core_adapter.js';
 import { EvidenceValidator } from './evidence_validator.js';
 import type { ExecutionIntent } from './types/intent.js';
+import { RuvectorClient } from './ruvector_client.js';
+import { ExecutionListener } from './execution_listener.js';
 
 const PORT = parseInt(process.env.PORT ?? '8080', 10);
 const HMAC_SECRET = process.env.EXECUTION_HMAC_SECRET ?? '';
@@ -145,17 +147,36 @@ const server = createServer(async (req, res) => {
 
 // --- Execution listener for AGENTICS_MODE=execution or AGENTICS_ROLE=execution ---
 
-function startExecutionListener(): void {
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`agentics-execution-engine listening on port ${PORT}`);
-    console.log('[execution] listener started');
+async function startExecutionListener(): Promise<void> {
+  console.log('[execution] starting listener…');
+
+  const ruvectorClient = new RuvectorClient({
+    serviceUrl: process.env.RUVECTOR_SERVICE_URL!,
+    apiKey: process.env.RUVECTOR_API_KEY!,
+    clientId: 'execution-engine',
   });
+
+  await ruvectorClient.connect();
+
+  console.log('[execution] connected to ruvector');
+
+  const listener = new ExecutionListener({
+    ruvectorClient,
+  });
+
+  listener.start();
+
+  console.log('[execution] listener started');
 }
 
-if (AGENTICS_MODE === 'execution' || AGENTICS_ROLE === 'execution') {
-  startExecutionListener();
-} else {
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`agentics-execution-engine listening on port ${PORT}`);
-  });
-}
+// --- Boot ---
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`agentics-execution-engine listening on port ${PORT}`);
+});
+
+(async () => {
+  if (AGENTICS_MODE === 'execution' || AGENTICS_ROLE === 'execution') {
+    await startExecutionListener();
+  }
+})();
