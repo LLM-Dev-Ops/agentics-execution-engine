@@ -178,6 +178,11 @@ server.listen(PORT, '0.0.0.0', () => {
 
 (async () => {
   if (AGENTICS_MODE === 'execution' || AGENTICS_ROLE === 'execution') {
-    await startExecutionListener();
+    try {
+      await startExecutionListener();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[execution] listener failed to start (non-fatal):', message);
+    }
   }
 })();
