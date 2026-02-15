@@ -51,6 +51,21 @@ export class RuvectorClient {
     }
   }
 
+  async publish(event: string, payload: unknown): Promise<void> {
+    const url = `${this.serviceUrl}/v1/publish`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({ client_id: this.clientId, event, payload }),
+    });
+    if (!res.ok) {
+      throw new Error(`Ruvector publish failed: ${res.status} ${res.statusText}`);
+    }
+  }
+
   async disconnect(): Promise<void> {
     if (!this.connected) return;
     const url = `${this.serviceUrl}/v1/disconnect`;

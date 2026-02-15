@@ -162,6 +162,7 @@ async function startExecutionListener(): Promise<void> {
 
   const listener = new ExecutionListener({
     ruvectorClient,
+    dispatcher,
   });
 
   listener.start();
