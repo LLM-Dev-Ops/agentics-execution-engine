@@ -256,3 +256,95 @@ describe('ExecutionDispatcher', () => {
     expect(parsed.core_results).toHaveLength(graph.core_results.length);
   });
 });
+
+// ADR-009: long-poll delivery is at-least-once, so dispatch must be idempotent
+// on the ruvector-minted execution_id.
+describe('ExecutionDispatcher idempotency on execution_id', () => {
+  beforeEach(() => { idCounter = 0; });
+
+  function successDispatcher() {
+    return makeDispatcher(
+      { 'code-gen': 'https://code-gen.example.com' },
+      { 'code-gen': makeCoreResult('code-gen', ['test_report']) },
+    );
+  }
+
+  it('adopts the supplied execution_id instead of minting one', async () => {
+    const graph = await successDispatcher().dispatchExecution(makeIntent(), {
+      executionId: 'exec-ruvector-1',
+    });
+
+    expect(graph.execution_id).toBe('exec-ruvector-1');
+  });
+
+  it('returns the same graph for a repeated execution_id', async () => {
+    const dispatcher = successDispatcher();
+
+    const first = await dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-1' });
+    const second = await dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-1' });
+
+    expect(second).toBe(first);
+    expect(second.execution_id).toBe('exec-1');
+  });
+
+  it('collapses concurrent deliveries of one execution_id onto a single run', async () => {
+    const dispatcher = successDispatcher();
+
+    const [a, b] = await Promise.all([
+      dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-1' }),
+      dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-1' }),
+    ]);
+
+    expect(a).toBe(b);
+  });
+
+  it('treats distinct execution_ids as distinct executions', async () => {
+    const dispatcher = successDispatcher();
+
+    const first = await dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-1' });
+    const second = await dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-2' });
+
+    expect(second).not.toBe(first);
+    expect(second.execution_id).toBe('exec-2');
+  });
+
+  it('mints an execution_id when none is supplied, and does not cache', async () => {
+    const dispatcher = successDispatcher();
+
+    const first = await dispatcher.dispatchExecution(makeIntent());
+    const second = await dispatcher.dispatchExecution(makeIntent());
+
+    expect(first.execution_id).not.toBe(second.execution_id);
+  });
+
+  it('reuses the supplied execution_id on a validation failure too', async () => {
+    const graph = await successDispatcher().dispatchExecution(
+      makeIntent({ cores_required: [] }),
+      { executionId: 'exec-bad-1' },
+    );
+
+    expect(graph.status).toBe('failed');
+    expect(graph.execution_id).toBe('exec-bad-1');
+  });
+
+  it('evicts the oldest tracked execution past the cap', async () => {
+    const registry = makeRegistry({ 'code-gen': 'https://code-gen.example.com' });
+    const httpClient = makeHttpClient({ 'code-gen': makeCoreResult('code-gen', ['test_report']) });
+    const dispatcher = new ExecutionDispatcher({
+      coreAdapter: new CoreAdapter(registry, httpClient, {
+        max_attempts: 1, base_delay_ms: 0, max_delay_ms: 0, backoff_factor: 1, retryable_codes: [],
+      }),
+      evidenceValidator: new EvidenceValidator(),
+      idGenerator: mockIdGen,
+      clock: mockClock,
+      maxTrackedExecutions: 2,
+    });
+
+    const first = await dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-1' });
+    await dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-2' });
+    await dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-3' });
+
+    // exec-1 fell out of the window, so it re-runs rather than replaying.
+    expect(await dispatcher.dispatchExecution(makeIntent(), { executionId: 'exec-1' })).not.toBe(first);
+  });
+});
