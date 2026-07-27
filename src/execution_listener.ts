@@ -1,6 +1,10 @@
 import type { RuvectorClient } from './ruvector_client.js';
 import type { ExecutionDispatcher } from './execution_dispatcher.js';
-import type { ExecutionIntent } from './types/intent.js';
+import {
+  parsePlanApprovedEvent,
+  toExecutionIntent,
+  PlanApprovedValidationError,
+} from './types/plan_approved.js';
 
 export interface ExecutionListenerOptions {
   ruvectorClient: RuvectorClient;
@@ -27,17 +31,11 @@ export class ExecutionListener {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[execution] failed to subscribe to plan_approved:', message);
     });
-
-    this.ruvectorClient.subscribe('execution_started', (payload: unknown) => {
-      this.handleExecutionStarted(payload);
-    }).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error('[execution] failed to subscribe to execution_started:', message);
-    });
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.running = false;
+    await this.ruvectorClient.stop();
   }
 
   isRunning(): boolean {
@@ -45,15 +43,24 @@ export class ExecutionListener {
   }
 
   private handlePlanApproved(payload: unknown): void {
-    console.log('[execution] received plan_approved event:', JSON.stringify(payload));
-
-    const intent = payload as ExecutionIntent;
-    if (!intent || !intent.intent_id) {
-      console.error('[execution] plan_approved payload missing intent_id, skipping');
-      return;
+    let event;
+    try {
+      event = parsePlanApprovedEvent(payload);
+    } catch (err: unknown) {
+      if (err instanceof PlanApprovedValidationError) {
+        console.error('[execution] rejected plan_approved event —', err.message);
+        return;
+      }
+      throw err;
     }
 
+    const executionId = event.execution_id;
+    const intent = toExecutionIntent(event);
+
+    console.log('[execution] accepted plan_approved event:', executionId);
+
     this.ruvectorClient.publish('execution_started', {
+      execution_id: executionId,
       intent_id: intent.intent_id,
       started_at: new Date().toISOString(),
     }).catch((err: unknown) => {
@@ -61,7 +68,7 @@ export class ExecutionListener {
       console.error('[execution] failed to publish execution_started:', message);
     });
 
-    this.dispatcher.dispatchExecution(intent).then((graph) => {
+    this.dispatcher.dispatchExecution(intent, { executionId }).then((graph) => {
       console.log('[execution] execution completed:', graph.execution_id, 'status:', graph.status);
 
       this.ruvectorClient.publish('execution_completed', {
@@ -78,9 +85,5 @@ export class ExecutionListener {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[execution] dispatch failed after plan_approved:', message);
     });
-  }
-
-  private handleExecutionStarted(payload: unknown): void {
-    console.log('[execution] received execution_started event:', JSON.stringify(payload));
   }
 }

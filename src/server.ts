@@ -6,6 +6,7 @@ import { EvidenceValidator } from './evidence_validator.js';
 import type { ExecutionIntent } from './types/intent.js';
 import { RuvectorClient } from './ruvector_client.js';
 import { ExecutionListener } from './execution_listener.js';
+import { FileCursorStore } from './utils/cursor_store.js';
 
 const PORT = parseInt(process.env.PORT ?? '8080', 10);
 const HMAC_SECRET = process.env.EXECUTION_HMAC_SECRET ?? '';
@@ -150,10 +151,25 @@ const server = createServer(async (req, res) => {
 async function startExecutionListener(): Promise<void> {
   console.log('[execution] starting listener…');
 
+  const serviceUrl = process.env.RUVECTOR_SERVICE_URL ?? '';
+  const apiKey = process.env.RUVECTOR_API_KEY ?? '';
+  const missing = [
+    serviceUrl ? null : 'RUVECTOR_SERVICE_URL',
+    apiKey ? null : 'RUVECTOR_API_KEY',
+  ].filter((v): v is string => v !== null);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `execution mode requires ${missing.join(' and ')}; refusing to start a listener that can never receive`,
+    );
+  }
+
+  const cursorPath = process.env.RUVECTOR_CURSOR_PATH;
   const ruvectorClient = new RuvectorClient({
-    serviceUrl: process.env.RUVECTOR_SERVICE_URL!,
-    apiKey: process.env.RUVECTOR_API_KEY!,
+    serviceUrl,
+    apiKey,
     clientId: 'execution-engine',
+    cursorStore: cursorPath ? new FileCursorStore(cursorPath) : undefined,
   });
 
   await ruvectorClient.connect();
@@ -182,7 +198,8 @@ server.listen(PORT, '0.0.0.0', () => {
       await startExecutionListener();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error('[execution] listener failed to start (non-fatal):', message);
+      console.error('[execution] listener failed to start:', message);
+      process.exit(1);
     }
   }
 })();

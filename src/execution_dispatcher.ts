@@ -15,11 +15,19 @@ import { ExecutionTrace, type IdGenerator, type Clock } from './execution_trace.
 import { EvidenceValidator } from './evidence_validator.js';
 import { CoreAdapter } from './core_adapter.js';
 
+const DEFAULT_MAX_TRACKED_EXECUTIONS = 1000;
+
 export interface DispatcherDeps {
   readonly coreAdapter: CoreAdapter;
   readonly evidenceValidator: EvidenceValidator;
   readonly idGenerator?: IdGenerator;
   readonly clock?: Clock;
+  readonly maxTrackedExecutions?: number;
+}
+
+export interface DispatchOptions {
+  /** Ruvector-minted execution_id. Also the idempotency key for at-least-once redelivery. */
+  readonly executionId?: string;
 }
 
 export class ExecutionDispatcher {
@@ -27,21 +35,53 @@ export class ExecutionDispatcher {
   private readonly evidenceValidator: EvidenceValidator;
   private readonly idGen: IdGenerator;
   private readonly clock: Clock;
+  private readonly maxTrackedExecutions: number;
+  private readonly byExecutionId = new Map<string, Promise<ExecutionGraph>>();
 
   constructor(deps: DispatcherDeps) {
     this.coreAdapter = deps.coreAdapter;
     this.evidenceValidator = deps.evidenceValidator;
     this.idGen = deps.idGenerator ?? { generate: () => randomUUID() };
     this.clock = deps.clock ?? { now: () => new Date().toISOString() };
+    this.maxTrackedExecutions = deps.maxTrackedExecutions ?? DEFAULT_MAX_TRACKED_EXECUTIONS;
   }
 
-  async dispatchExecution(intent: ExecutionIntent): Promise<ExecutionGraph> {
+  async dispatchExecution(
+    intent: ExecutionIntent,
+    options?: DispatchOptions,
+  ): Promise<ExecutionGraph> {
+    const executionId = options?.executionId;
+    if (!executionId) return this.runDispatch(intent, undefined);
+
+    const existing = this.byExecutionId.get(executionId);
+    if (existing) return existing;
+
+    const pending = this.runDispatch(intent, executionId);
+    this.track(executionId, pending);
+    // A rejected dispatch is not a completed one; drop it so redelivery can retry.
+    pending.catch(() => this.byExecutionId.delete(executionId));
+    return pending;
+  }
+
+  private track(executionId: string, pending: Promise<ExecutionGraph>): void {
+    this.byExecutionId.set(executionId, pending);
+    while (this.byExecutionId.size > this.maxTrackedExecutions) {
+      const oldest = this.byExecutionId.keys().next();
+      if (oldest.done) break;
+      this.byExecutionId.delete(oldest.value);
+    }
+  }
+
+  private async runDispatch(
+    intent: ExecutionIntent,
+    executionId: string | undefined,
+  ): Promise<ExecutionGraph> {
     const startedAt = this.clock.now();
 
     // Phase 1: Validate intent
     const validation = validateIntent(intent);
     if (!validation.valid) {
-      return this.failedGraph(intent, startedAt, validation.errors);
+      return this.failedGraph(intent, executionId, startedAt, validation.errors);
     }
 
     // Phase 2: Resolve cores
@@ -53,14 +93,14 @@ export class ExecutionDispatcher {
           requirement.version_constraint,
         );
         if (!resolved) {
-          return this.failedGraph(intent, startedAt, [
+          return this.failedGraph(intent, executionId, startedAt, [
             makeError('CORE_NOT_FOUND', `Core not found: ${requirement.core_name}`),
           ]);
         }
         resolvedCores.push({ requirement, resolved });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return this.failedGraph(intent, startedAt, [
+        return this.failedGraph(intent, executionId, startedAt, [
           makeError('REGISTRY_UNAVAILABLE', message, true),
         ]);
       }
@@ -71,13 +111,13 @@ export class ExecutionDispatcher {
     const executionOrder = topologicalSort(resolvedCores, depGraph);
 
     if (executionOrder.hasCycle) {
-      return this.failedGraph(intent, startedAt, [
+      return this.failedGraph(intent, executionId, startedAt, [
         makeError('CYCLE_DETECTED', 'Circular dependency detected among Cores'),
       ]);
     }
 
     // Phase 4: Dispatch in batch order
-    const trace = ExecutionTrace.create(intent, this.idGen, this.clock);
+    const trace = ExecutionTrace.create(intent, this.idGen, this.clock, executionId);
     const coreResults = new Map<string, CoreExecutionResult>();
     const failedCores = new Set<string>();
 
@@ -173,14 +213,14 @@ export class ExecutionDispatcher {
 
   private failedGraph(
     intent: ExecutionIntent,
+    executionId: string | undefined,
     startedAt: string,
     errors: readonly ExecutionError[],
   ): ExecutionGraph {
     const completedAt = this.clock.now();
-    const executionId = this.idGen.generate();
 
     return {
-      execution_id: executionId,
+      execution_id: executionId ?? this.idGen.generate(),
       intent_id: intent.intent_id,
       status: 'failed',
       started_at: startedAt,

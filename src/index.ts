@@ -1,4 +1,15 @@
-export { ExecutionDispatcher, type DispatcherDeps } from './execution_dispatcher.js';
+export { ExecutionDispatcher, type DispatcherDeps, type DispatchOptions } from './execution_dispatcher.js';
+export { RuvectorClient, type RuvectorClientOptions, type CursorStore, type EventHandler } from './ruvector_client.js';
+export { ExecutionListener, type ExecutionListenerOptions } from './execution_listener.js';
+export { FileCursorStore } from './utils/cursor_store.js';
+export {
+  parsePlanApprovedEvent,
+  toExecutionIntent,
+  planApprovedEventSchema,
+  PlanApprovedValidationError,
+  type PlanApprovedEvent,
+  type PlanApprovedIssue,
+} from './types/plan_approved.js';
 export { CoreAdapter, type ContractRegistry, type ContractEntry, type ContractVersion, type HttpClient, type HttpResponse, type RetryPolicy } from './core_adapter.js';
 export { EvidenceValidator } from './evidence_validator.js';
 export { ExecutionTrace, type TraceEvent, type TraceEventType, type TraceStatus, type IdGenerator, type Clock } from './execution_trace.js';

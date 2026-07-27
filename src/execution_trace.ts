@@ -55,8 +55,9 @@ export class ExecutionTrace {
     intent: ExecutionIntent,
     idGen: IdGenerator = defaultIdGenerator,
     clock: Clock = defaultClock,
+    executionId?: string,
   ): ExecutionTrace {
-    const trace = new ExecutionTrace(idGen.generate(), intent.intent_id, idGen, clock);
+    const trace = new ExecutionTrace(executionId ?? idGen.generate(), intent.intent_id, idGen, clock);
     trace.appendEvent('EXECUTION_STARTED', { intent_id: intent.intent_id, requested_by: intent.requested_by });
     return trace;
   }
